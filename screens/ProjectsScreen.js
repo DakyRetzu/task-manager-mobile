@@ -27,7 +27,7 @@ function MomentumRing({ percent }) {
 }
 
 export default function ProjectsScreen({ navigation }) {
-  const { projects, tasks, userName, addProject, deleteProject, projectProgress } = useApp();
+  const { projects, tasks, userName, signOut, addProject, deleteProject, projectProgress } = useApp();
   const [activeFilter, setActiveFilter] = useState('All');
   const [modalVisible, setModalVisible] = useState(false);
   const [newName, setNewName] = useState('');
@@ -50,10 +50,9 @@ export default function ProjectsScreen({ navigation }) {
             <Text style={styles.greeting}>Good morning</Text>
             <Text style={styles.title}>{userName || 'there'}</Text>
           </View>
-          <View style={styles.bell}>
-            <Text style={{ color: colors.textDim }}>🔔</Text>
-            <View style={styles.badge} />
-          </View>
+          <TouchableOpacity style={styles.bell} onPress={signOut}>
+            <Text style={{ color: colors.textDim, fontSize: 11 }}>⎋</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.momentumCard}>
@@ -84,7 +83,7 @@ export default function ProjectsScreen({ navigation }) {
 
         <View style={styles.list}>
           {projects.map((p) => {
-            const projectTasks = tasks.filter((t) => t.projectId === p.id);
+            const projectTasks = tasks.filter((t) => t.project_id === p.id);
             const progress = projectProgress(p.id);
             return (
               <TouchableOpacity key={p.id} style={styles.card} onPress={() => navigation.navigate('Board', { project: p })}>

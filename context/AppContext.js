@@ -1,66 +1,143 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { supabase } from '../lib/supabase';
 
 const AppContext = createContext(null);
 
-const initialProjects = [
-  { id: 'PRJ-014', name: 'Client Portal Revamp' },
-  { id: 'PRJ-011', name: 'Mobile Onboarding v2' },
-  { id: 'PRJ-009', name: 'Internal Design System' },
-];
-
-const initialTasks = [
-  { id: 'TSK-041', projectId: 'PRJ-014', title: 'Define empty-state copy for dashboard', status: 'todo', due: 'SEP 3', assignee: 'JR', priority: 'Normal', description: 'Write copy for the dashboard when a user has no projects yet.' },
-  { id: 'TSK-042', projectId: 'PRJ-014', title: 'Audit color contrast on light theme', status: 'todo', due: 'SEP 5', assignee: 'DT', priority: 'Normal', description: 'Check every screen against WCAG AA in light mode.' },
-  { id: 'TSK-037', projectId: 'PRJ-014', title: 'Build settings → billing screen', status: 'progress', due: 'SEP 1', assignee: 'MK', priority: 'High', description: 'Plan summary, invoice history, payment method management.' },
-  { id: 'TSK-029', projectId: 'PRJ-014', title: 'Set up real-time sync layer', status: 'done', due: 'AUG 27', assignee: 'DT', priority: 'Normal', description: 'Wire up live updates across connected clients.' },
-];
-
-let taskCounter = initialTasks.length;
-let projectCounter = initialProjects.length;
-
 export function AppProvider({ children }) {
-  const [projects, setProjects] = useState(initialProjects);
-  const [tasks, setTasks] = useState(initialTasks);
-  const [userName, setUserName] = useState('');
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [projects, setProjects] = useState([]);
+  const [tasks, setTasks] = useState([]);
 
-  function addProject(name) {
-    projectCounter += 1;
-    const newProject = { id: `PRJ-${String(projectCounter).padStart(3, '0')}`, name };
-    setProjects((prev) => [newProject, ...prev]);
-    return newProject;
-  }
+  // Track auth session
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setAuthLoading(false);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
 
-  function deleteProject(projectId) {
-    setProjects((prev) => prev.filter((p) => p.id !== projectId));
-    setTasks((prev) => prev.filter((t) => t.projectId !== projectId));
-  }
+  const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || '';
 
-  function addTask(projectId, title) {
-    taskCounter += 1;
-    const newTask = {
-      id: `TSK-${String(taskCounter).padStart(3, '0')}`,
-      projectId,
-      title,
-      status: 'todo',
-      due: '—',
-      assignee: 'DT',
-      priority: 'Normal',
-      description: '',
+  const loadData = useCallback(async () => {
+    if (!session) return;
+    const { data: projectRows } = await supabase.from('projects').select('*').order('created_at', { ascending: false });
+    const { data: taskRows } = await supabase.from('tasks').select('*').order('created_at', { ascending: false });
+    setProjects(projectRows || []);
+    setTasks(taskRows || []);
+  }, [session]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Real-time subscriptions
+  useEffect(() => {
+    if (!session) return;
+
+    const channel = supabase
+      .channel('db-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, (payload) => {
+        setProjects((prev) => {
+          if (payload.eventType === 'INSERT') {
+            if (prev.some((p) => p.id === payload.new.id)) return prev;
+            return [payload.new, ...prev];
+          }
+          if (payload.eventType === 'UPDATE') {
+            return prev.map((p) => (p.id === payload.new.id ? payload.new : p));
+          }
+          if (payload.eventType === 'DELETE') {
+            return prev.filter((p) => p.id !== payload.old.id);
+          }
+          return prev;
+        });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
+        setTasks((prev) => {
+          if (payload.eventType === 'INSERT') {
+            if (prev.some((t) => t.id === payload.new.id)) return prev;
+            return [payload.new, ...prev];
+          }
+          if (payload.eventType === 'UPDATE') {
+            return prev.map((t) => (t.id === payload.new.id ? payload.new : t));
+          }
+          if (payload.eventType === 'DELETE') {
+            return prev.filter((t) => t.id !== payload.old.id);
+          }
+          return prev;
+        });
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
     };
-    setTasks((prev) => [newTask, ...prev]);
-    return newTask;
+  }, [session]);
+
+  async function signIn(email, password) {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
   }
 
-  function deleteTask(taskId) {
+  async function signUp(email, password, fullName) {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: fullName } },
+    });
+    if (error) throw error;
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut();
+    setProjects([]);
+    setTasks([]);
+  }
+
+  async function addProject(name) {
+    const { data, error } = await supabase
+      .from('projects')
+      .insert({ name, owner_id: session.user.id })
+      .select()
+      .single();
+    if (error) throw error;
+    setProjects((prev) => [data, ...prev]);
+    return data;
+  }
+
+  async function deleteProject(projectId) {
+    await supabase.from('projects').delete().eq('id', projectId);
+    setProjects((prev) => prev.filter((p) => p.id !== projectId));
+    setTasks((prev) => prev.filter((t) => t.project_id !== projectId));
+  }
+
+  async function addTask(projectId, title) {
+    const { data, error } = await supabase
+      .from('tasks')
+      .insert({ project_id: projectId, title, status: 'todo', assignee: userName.slice(0, 2).toUpperCase() || 'ME' })
+      .select()
+      .single();
+    if (error) throw error;
+    setTasks((prev) => [data, ...prev]);
+    return data;
+  }
+
+  async function deleteTask(taskId) {
+    await supabase.from('tasks').delete().eq('id', taskId);
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
   }
 
-  function updateTaskStatus(taskId, status) {
+  async function updateTaskStatus(taskId, status) {
+    await supabase.from('tasks').update({ status }).eq('id', taskId);
     setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status } : t)));
   }
 
   function tasksForProject(projectId) {
-    return tasks.filter((t) => t.projectId === projectId);
+    return tasks.filter((t) => t.project_id === projectId);
   }
 
   function projectProgress(projectId) {
@@ -73,7 +150,9 @@ export function AppProvider({ children }) {
   return (
     <AppContext.Provider
       value={{
-        projects, tasks, userName, setUserName,
+        session, authLoading, userName,
+        projects, tasks,
+        signIn, signUp, signOut,
         addProject, deleteProject, addTask, deleteTask,
         updateTaskStatus, tasksForProject, projectProgress,
       }}

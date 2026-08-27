@@ -1,19 +1,36 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, Alert } from 'react-native';
 import { colors, fonts } from '../theme';
 import { useApp } from '../context/AppContext';
 
 export default function LoginScreen({ navigation }) {
-  const { setUserName } = useApp();
+  const { signIn, signUp } = useApp();
+  const [mode, setMode] = useState('signin'); // 'signin' | 'signup'
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const canSubmit = name.trim().length > 0;
+  const canSubmit =
+    email.trim().length > 3 &&
+    password.length >= 6 &&
+    (mode === 'signin' || name.trim().length > 0);
 
-  function handleSignIn() {
-    if (!canSubmit) return;
-    setUserName(name.trim());
-    navigation.replace('Projects');
+  async function handleSubmit() {
+    if (!canSubmit || loading) return;
+    setLoading(true);
+    try {
+      if (mode === 'signup') {
+        await signUp(email.trim(), password, name.trim());
+      } else {
+        await signIn(email.trim(), password);
+      }
+      // navigation happens automatically once App.js sees the session change
+    } catch (e) {
+      Alert.alert('Something went wrong', e.message || 'Please try again.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -33,16 +50,33 @@ export default function LoginScreen({ navigation }) {
         <Text style={{ fontStyle: 'italic', color: colors.platinum }}>week</Text> comes{'\n'}
         together.
       </Text>
-      <Text style={styles.desc}>Sign in to pick up where your team left off.</Text>
+      <Text style={styles.desc}>
+        {mode === 'signin' ? 'Sign in to pick up where your team left off.' : 'Create an account to get started.'}
+      </Text>
+
+      {mode === 'signup' && (
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>YOUR NAME</Text>
+          <TextInput
+            style={styles.input}
+            value={name}
+            onChangeText={setName}
+            placeholder="e.g. Danijel"
+            placeholderTextColor={colors.textFaint}
+          />
+        </View>
+      )}
 
       <View style={styles.field}>
-        <Text style={styles.fieldLabel}>YOUR NAME</Text>
+        <Text style={styles.fieldLabel}>EMAIL</Text>
         <TextInput
           style={styles.input}
-          value={name}
-          onChangeText={setName}
-          placeholder="e.g. Danijel"
+          value={email}
+          onChangeText={setEmail}
+          placeholder="you@studio.com"
           placeholderTextColor={colors.textFaint}
+          autoCapitalize="none"
+          keyboardType="email-address"
         />
       </View>
 
@@ -52,23 +86,33 @@ export default function LoginScreen({ navigation }) {
           style={styles.input}
           value={password}
           onChangeText={setPassword}
-          placeholder="••••••••••"
+          placeholder="At least 6 characters"
           placeholderTextColor={colors.textFaint}
           secureTextEntry
         />
       </View>
 
       <TouchableOpacity
-        style={[styles.button, !canSubmit && styles.buttonDisabled]}
-        onPress={handleSignIn}
-        disabled={!canSubmit}
+        style={[styles.button, (!canSubmit || loading) && styles.buttonDisabled]}
+        onPress={handleSubmit}
+        disabled={!canSubmit || loading}
       >
-        <Text style={styles.buttonText}>Sign in</Text>
+        {loading ? (
+          <ActivityIndicator color={colors.bg} />
+        ) : (
+          <Text style={styles.buttonText}>{mode === 'signin' ? 'Sign in' : 'Create account'}</Text>
+        )}
       </TouchableOpacity>
 
-      <Text style={styles.ghostText}>
-        No account yet? <Text style={{ color: colors.platinum }}>Create one</Text>
-      </Text>
+      <TouchableOpacity onPress={() => setMode(mode === 'signin' ? 'signup' : 'signin')}>
+        <Text style={styles.ghostText}>
+          {mode === 'signin' ? (
+            <>No account yet? <Text style={{ color: colors.platinum }}>Create one</Text></>
+          ) : (
+            <>Already have an account? <Text style={{ color: colors.platinum }}>Sign in</Text></>
+          )}
+        </Text>
+      </TouchableOpacity>
     </KeyboardAvoidingView>
   );
 }
@@ -108,8 +152,8 @@ const styles = StyleSheet.create({
     color: colors.textDim,
     fontSize: 14,
     lineHeight: 21,
-    marginBottom: 36,
-    maxWidth: 250,
+    marginBottom: 30,
+    maxWidth: 260,
   },
   field: { marginBottom: 16 },
   fieldLabel: {

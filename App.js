@@ -11,9 +11,40 @@ import ProjectsScreen from './screens/ProjectsScreen';
 import BoardScreen from './screens/BoardScreen';
 import TaskDetailScreen from './screens/TaskDetailScreen';
 import { colors } from './theme';
-import { AppProvider } from './context/AppContext';
+import { AppProvider, useApp } from './context/AppContext';
 
 const Stack = createNativeStackNavigator();
+
+function RootNavigator() {
+  const { session, authLoading } = useApp();
+
+  if (authLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator color={colors.platinum} />
+      </View>
+    );
+  }
+
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: colors.bg },
+      }}
+    >
+      {session ? (
+        <>
+          <Stack.Screen name="Projects" component={ProjectsScreen} />
+          <Stack.Screen name="Board" component={BoardScreen} />
+          <Stack.Screen name="TaskDetail" component={TaskDetailScreen} presentation="modal" />
+        </>
+      ) : (
+        <Stack.Screen name="Login" component={LoginScreen} />
+      )}
+    </Stack.Navigator>
+  );
+}
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -36,17 +67,7 @@ export default function App() {
     <AppProvider>
       <NavigationContainer>
         <StatusBar style="light" />
-        <Stack.Navigator
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.bg },
-          }}
-        >
-          <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="Projects" component={ProjectsScreen} />
-          <Stack.Screen name="Board" component={BoardScreen} />
-          <Stack.Screen name="TaskDetail" component={TaskDetailScreen} presentation="modal" />
-        </Stack.Navigator>
+        <RootNavigator />
       </NavigationContainer>
     </AppProvider>
   );
